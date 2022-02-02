@@ -1,0 +1,251 @@
+import java.awt.Font;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.ObjectInputStream;
+import java.net.Socket;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JFrame;
+import javax.swing.JTextField;
+
+
+public class FolderReceiver extends JFrame {
+	
+	private Socket user;
+	private String host;
+	private int port;
+	private String originalPath;
+	
+	private File saveFile = new File("Saves.txt");
+
+	private JTextField inPath = new JTextField("Enter The Recieving File Location (path)");
+	private JTextField inIpAddress = new JTextField("Enter The Sender IP Address");
+	private JTextField inPort = new JTextField("Enter The Port");
+	private JButton receive = new JButton("RECEIVE");
+	
+	private JComboBox<ReceiveSession> saves = new JComboBox<ReceiveSession>();
+	
+	private JButton saveButton = new JButton("Save Set");
+	
+	/**
+	 * @param host
+	 * @param port
+	 * @param originalPath
+	 * @throws IOException
+	 * @throws ClassNotFoundException
+	 * @throws InterruptedException
+	 */
+	public FolderReceiver() throws IOException, ClassNotFoundException, InterruptedException {
+		
+		setup();
+		
+    }
+	
+	private void setup() {
+		
+		setSize(720, 710);
+		setDefaultCloseOperation(EXIT_ON_CLOSE);
+		setLocationRelativeTo(null);
+		setResizable(false);
+		setVisible(true);
+		setLayout(null);
+
+		inPath.setBounds(10, 10, 690, 70);
+		inPath.setFont(new Font("Monospace", Font.PLAIN, 20));
+		add(inPath);
+		
+		inIpAddress.setBounds(10, 100, 690, 70);
+		inIpAddress.setFont(new Font("Monospace", Font.PLAIN, 20));
+		add(inIpAddress);
+		
+		inPort.setBounds(10, 190, 690, 70);
+		inPort.setFont(new Font("Monospace", Font.PLAIN, 20));
+		add(inPort);
+		
+		receive.setBounds(310, 300, 100, 80);
+		receive.addActionListener(new ActionListener() {
+			
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				try {
+					receiveFiles();
+				} catch (ClassNotFoundException | InterruptedException | IOException e1) {
+					// TODO Auto-generated catch block
+					e1.printStackTrace();
+				}
+				
+			}
+		});
+		add(receive);
+		
+		saves.setBounds(10, 400, 690, 50);
+		saves.setFont(new Font("Monospace", Font.PLAIN, 20));
+		
+		saves.addItem(null);
+		try {
+			readInSaves();
+		} catch (IOException e1) {	}
+		
+		saves.addActionListener(new ActionListener() {
+			
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				updateSelectedItem();
+			}
+		});
+		
+		add(saves);
+		
+		saveButton.setBounds(310, 480, 100, 75);
+		saveButton.addActionListener(new ActionListener() {
+			
+			@Override
+			public void actionPerformed(ActionEvent e){
+				try {
+					saveIn();
+					readInSaves();
+				}
+				catch (IOException | NumberFormatException e1) { }
+			}
+		});
+		
+		add(saveButton);
+
+	}
+	
+	private void saveIn() throws NumberFormatException, IOException {
+		
+		BufferedReader br = new BufferedReader(new FileReader(saveFile));
+		String contents = "";
+		String line = "";
+		while((line = br.readLine()) != null) {
+			
+			contents += line + "\n";
+			
+		}
+		
+		contents += inIpAddress.getText()+" "+inPort.getText()+" "+inPath.getText();
+		
+		br.close();
+		
+		BufferedWriter bw = new BufferedWriter(new FileWriter(saveFile));
+		bw.write(contents);
+		bw.close();
+		
+		
+	}
+	
+	private void readInSaves() throws IOException {
+		
+		BufferedReader br = new BufferedReader(new FileReader(saveFile));
+		String line = "";
+		saves.removeAllItems();
+		while((line = br.readLine()) != null) {
+			
+			String[] session = line.split(" ");
+			saves.addItem(new ReceiveSession(session[0], Integer.parseInt(session[1]), session[2]));
+
+		}
+		
+		br.close();
+		
+	}
+	
+	public void updateSelectedItem() {
+		
+		ReceiveSession item;
+		if((item = (ReceiveSession) saves.getSelectedItem()) != null) {
+			
+			inPath.setText(item.path);
+			inIpAddress.setText(item.ipAddress);
+			inPort.setText("" + item.port);
+			
+		}
+		
+	}
+	
+	public void receiveFiles() throws InterruptedException, IOException, ClassNotFoundException {
+
+		originalPath = inPath.getText();
+		host = inIpAddress.getText();
+		port = Integer.parseInt(inPort.getText());
+		
+		user = new Socket(host, port);
+		
+		Thread.sleep(500);
+        
+        InputStream in = user.getInputStream();
+        byte[] inBytes = new byte[2000000000];
+        int index = 0;
+        
+        while (in.available() > 0) {
+        	
+        	inBytes[index] = (byte) in.read();
+        	index++;
+        	
+        }
+        
+        Folder folder = (Folder) deserialize(inBytes);
+        Files.createDirectories(Paths.get(originalPath + folder.getAbsolutePath().substring(folder.getAbsolutePath().indexOf("\\"))));
+        process(folder, originalPath);
+            
+        in.close();
+        user.close();
+		
+	}
+	
+	public static void process(Folder fol, String originalPath) throws IOException {
+	
+		for(File f : fol.files) {
+			
+			String filepath = originalPath + f.getAbsolutePath().substring(f.getAbsolutePath().indexOf("\\"));
+			//System.out.println(filepath);
+			if(f.getName().indexOf(".") < 0) {
+				
+				Files.createDirectories(Paths.get(filepath));
+				process((Folder)f, originalPath);
+				
+			} else if(f instanceof FolderFile){
+				
+				System.out.println(filepath);
+				new File(filepath).createNewFile();
+				FileOutputStream fos = new FileOutputStream(new File(filepath));
+				fos.write(((FolderFile)f).contents);
+		      		        
+			}
+			
+		}
+		
+	}
+	
+	private Object deserialize(byte[] ary) throws IOException, ClassNotFoundException {
+		
+		ByteArrayInputStream in = new ByteArrayInputStream(ary);
+		ObjectInputStream objstrm = new ObjectInputStream(in);
+		
+		return objstrm.readObject();
+		
+	}
+
+    public static void main(String[] args) throws Exception {
+
+        new FolderReceiver();
+
+    }
+	
+}
+
+
+
